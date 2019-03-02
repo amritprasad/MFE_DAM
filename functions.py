@@ -10,6 +10,8 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import statsmodels.formula.api as sm
+from arch import arch_model
+from scipy.optimize import minimize, basinhopping
 
 
 def makedir(folder, sub_folder=None):
@@ -132,12 +134,12 @@ def calc_ir(data_df, bench='MKT'):
     reg_cols = [[x, bench] for x in irof]
     ann_dates_end = pd.date_range(data_df.index.min(), data_df.index.max(),
                                   freq='Y')
-    ann_dates_end = ann_dates_end.union([data_df.index.max() +
-                                         pd.offsets.YearEnd()])
     ann_dates_start = pd.date_range(data_df.index.min(), data_df.index.max(),
                                     freq='YS')
     ann_dates_start = ann_dates_start.union([pd.offsets.YearBegin(-1) +
                                              data_df.index.min()])
+    # Remove the last date since 2019 has only 1 month worth of data points
+    ann_dates_start = ann_dates_start[:-1]
     ir_df = pd.DataFrame(columns=irof)
     for start_date, end_date in zip(ann_dates_start, ann_dates_end):
         for col in reg_cols:
@@ -158,4 +160,110 @@ def calc_ir(data_df, bench='MKT'):
                     ir_df.loc[end_date, col[0]] = np.nan
     # Plot IRs
     ir_df.plot(grid=True, figsize=(10, 6))
-    return ir_df.astype(float)
+    return ir_df.astype(float), ann_dates_start, ann_dates_end
+
+
+def vol_GARCH(mkt_ret, period_start, period_end):
+    """
+    Function to calculate the GARCH volatility for market returns
+
+    Args:
+        mkt_ret (pd.Series): market returns
+
+        period_start (pd.DatetimeIndex): period start dates
+
+        period_end (pd.DatetimeIndex): period end dates
+
+    Returns:
+        forecast_vol (pd.Series): GARCH vol prediction
+    """
+    # mkt_ret=us_df['MKT'].copy()
+#    garch = arch_model(mkt_ret, mean='Constant', vol='GARCH', p=1, q=1,
+#                       hold_back=441)
+#    res = garch.fit()
+
+    def garchFunc(coeff, y, p, q, flag=False):
+        """
+        Function to calculate the negative LLK for the GARCH function
+
+        Args:
+            coeff (iterable): guess values
+
+            y (pd.Series): returns
+
+            p, q (int)
+
+        Returns:
+            Negative LLK value
+        """
+        # drop the first one since theres no lagged value for it
+        r = y[1:].values
+        r_lagged = y.shift(1)[1:].values
+        T = len(r)
+        resid = r - (coeff[0] + coeff[1]*r_lagged)
+        pq = max(p, q)
+        # ignore t = pq since its not part of the sum
+        resid_t = resid[pq:]
+
+        # filter the h
+        h_t = []
+        # really important how to choose h[0]
+        h_t.append(np.mean(resid ** 2))
+        h_t = h_t * pq
+        # calc the ht
+        for i in range(pq, T):
+            tmp = coeff[2]
+            for j in range((3+q), (3+q+p)):
+                tmp += coeff[j]*h_t[i-(j-(2+q))]
+            for j in range(3, (3+q)):
+                tmp += coeff[j]*(resid[i-(j-2)] ** 2)
+            h_t.append(tmp)
+
+        part_1 = -(T-pq)*np.log(2*np.pi)
+        part_2 = -np.log(h_t[pq:]).sum()
+        part_3 = -np.sum(np.square(resid_t)/h_t[pq:])
+
+        condloglike = 0.5*(part_1 + part_2 + part_3)
+        # because we are using a minimize function for maximizing likelihood
+
+        if (flag):
+            return pd.Series(h_t[0:1]+h_t)
+
+        return -condloglike
+
+    guess = np.array([.05, 0.2, .01,  0.1, 1])
+    eps = np.finfo(float).eps
+    bounds = [(eps, None), (None, None), (eps, None), (eps, None), (eps, None)]
+
+    # Convert periods to monthly
+    per_start = pd.date_range(period_start.min(), period_start.max(),
+                              freq='MS')
+    per_end = pd.date_range(period_end.min(), period_end.max(), freq='M')
+    params = pd.DataFrame(columns=['c', 'phi', 'zeta', 'alpha', 'delta'])
+    forecast_vol = pd.Series(name='GARCH_1m_FORECAST')
+    # Fit GARCH and forecast vol
+    for start_date, end_date in zip(per_start, per_end):
+        res = minimize(fun=garchFunc, x0=guess,
+                       args=(mkt_ret[start_date:end_date].copy(), 1, 1),
+                       method='L-BFGS-B', bounds=bounds)
+        count = 1
+        while not res.success:
+            min_kwargs = {'args': (mkt_ret[start_date:end_date].copy(), 1, 1),
+                          'method': 'TNC', 'bounds': bounds}
+            res_temp = basinhopping(func=garchFunc, x0=res.x, niter=100,
+                                    minimizer_kwargs=min_kwargs)
+            res = minimize(fun=garchFunc, x0=res_temp.x,
+                           args=(mkt_ret[start_date:end_date].copy(), 1, 1),
+                           method='L-BFGS-B', bounds=bounds)
+            count += 1
+            if count == 5:
+                raise ValueError('Optimizer did not converge')
+
+        params.loc[end_date] = res.x
+        next_month = [end_date+pd.offsets.MonthBegin(),
+                      end_date+pd.offsets.MonthEnd()]
+        forecast_vol.loc[end_date] = np.sqrt(garchFunc(
+                res.x, mkt_ret[next_month[0]:next_month[1]],
+                1, 1, True)).iloc[-1]
+
+    return forecast_vol
