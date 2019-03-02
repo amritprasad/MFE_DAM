@@ -41,4 +41,5 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 # Predict IRs
 # Get features for IR prediction
 # garch_df = fnc.vol_GARCH(mkt_ret, period_start, period_end)
-garch_df = pd.read_csv('./Data/GARCH_1m.csv', parse_dates=[0], index_col=[0])
+garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
+                       index_col=[0])
