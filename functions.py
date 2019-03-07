@@ -106,18 +106,20 @@ def rolling_corr(data_df, corrwith, window, title):
     # Create Plots folder
     makedir(plot_folder, sub_folder)
     plt.clf()
-    data_df.rolling(window=window, min_periods=int(window/3)).corr(
+    corrs=data_df.rolling(window=window, min_periods=int(window/3)).corr(
             pairwise=True).loc[pd.IndexSlice[:, corrof], corrwith].unstack(
-                    1).dropna(how='all').plot(grid=True, figsize=(12, 8),
+                    1).dropna(how='all')
+    corrs.plot(grid=True, figsize=(12, 8),
                                               title=title)
     if not os.path.exists(plot_folder):
         os.makedirs(plot_folder)
     plt.savefig(os.path.join(plot_folder, sub_folder, title + '.png'))
     plt.show()
     plt.close()
+    return corrs
 
 
-def calc_ir(data_df, bench='MKT'):
+def calc_ir(data_df, bench='MKT',freq='Y'):
     """
     Function to calculate annual IRs of all factors
 
@@ -133,9 +135,9 @@ def calc_ir(data_df, bench='MKT'):
     irof = data_df.columns.difference([bench])
     reg_cols = [[x, bench] for x in irof]
     ann_dates_end = pd.date_range(data_df.index.min(), data_df.index.max(),
-                                  freq='Y')
+                                  freq=freq)
     ann_dates_start = pd.date_range(data_df.index.min(), data_df.index.max(),
-                                    freq='YS')
+                                    freq=freq+'S')
     ann_dates_start = ann_dates_start.union([pd.offsets.YearBegin(-1) +
                                              data_df.index.min()])
     # Remove the last date since 2019 has only 1 month worth of data points
