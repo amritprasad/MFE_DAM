@@ -1,0 +1,4 @@
+ipykernel==5.1.0
+pandas==0.24.1
+matplotlib==3.0.3
+xlrd==1.2.0
