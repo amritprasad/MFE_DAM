@@ -117,29 +117,37 @@ def rolling_corr(data_df, corrwith, window, title):
     plt.close()
 
 
-def calc_ir(data_df, bench='MKT'):
+def calc_ir(data_df, bench='MKT', freq='M'):
     """
-    Function to calculate annual IRs of all factors
+    Function to calculate rolling IRs of all factors
 
     Args:
         data_df (pd.DataFrame): contains returns
 
         bench (str): benchmark
 
+        freq (str): provide the frequency for IR calculation
+
     Returns:
         ir_df (pd.DataFrame): contains IRs wrt benchmark
     """
-    # bench='MKT'; bench='RF'
+    # data_df=us_df.copy(); bench='MKT'; freq='M'
+    # bench='RF'; freq='Y'
+    if freq not in ['M', 'Y']:
+        raise ValueError('Only M and Y allowed as frequencies')
     irof = data_df.columns.difference([bench])
     reg_cols = [[x, bench] for x in irof]
     ann_dates_end = pd.date_range(data_df.index.min(), data_df.index.max(),
-                                  freq='Y')
+                                  freq=freq)
     ann_dates_start = pd.date_range(data_df.index.min(), data_df.index.max(),
-                                    freq='YS')
-    ann_dates_start = ann_dates_start.union([pd.offsets.YearBegin(-1) +
+                                    freq=freq+'S')
+    date_offset = pd.offsets.YearBegin(-1) if freq == 'Y'\
+        else pd.offsets.MonthBegin(-1)
+    ann_dates_start = ann_dates_start.union([date_offset +
                                              data_df.index.min()])
-    # Remove the last date since 2019 has only 1 month worth of data points
-    ann_dates_start = ann_dates_start[:-1]
+    # Remove 2019 since it has only 1 month worth of data points for freq='Y'
+    if freq == 'Y':
+        ann_dates_start = ann_dates_start[:-1]
     ir_df = pd.DataFrame(columns=irof)
     for start_date, end_date in zip(ann_dates_start, ann_dates_end):
         for col in reg_cols:

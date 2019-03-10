@@ -24,9 +24,9 @@ fnc.rolling_corr(us_df, corrwith='QUAL', window=126, title='US_QUAL')
 # %%
 # Calculate IRs
 # IRs wrt Market
-ir_mkt_df, period_start, period_end = fnc.calc_ir(us_df, bench='MKT')
+ir_mkt_df, period_start, period_end = fnc.calc_ir(us_df, bench='MKT', freq='M')
 # IRs wrt Risk-Free (basically Sharpe)
-ir_rf_df, _, _ = fnc.calc_ir(us_df, bench='RF')
+ir_rf_df, _, _ = fnc.calc_ir(us_df, bench='RF', freq='M')
 
 # The IRs wrt the market are very low for the factors implying that their
 # residual returns are usually not very significant. The IR for the risk-free
@@ -34,7 +34,7 @@ ir_rf_df, _, _ = fnc.calc_ir(us_df, bench='RF')
 # causing its residual risk (std deviation) to be very low. It shouldn't be
 # taken as indicative of great performance.
 
-# Check persistence of the IRs
+# Check persistence of the IRs (only freq='Y' makes sense)
 print(ir_mkt_df.apply(lambda x: x.autocorr(), axis=0))
 print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 # %%
@@ -43,3 +43,4 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 # garch_df = fnc.vol_GARCH(mkt_ret, period_start, period_end)
 garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
                        index_col=[0])
+# %%
