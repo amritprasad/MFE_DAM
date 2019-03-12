@@ -106,42 +106,48 @@ def rolling_corr(data_df, corrwith, window, title):
     # Create Plots folder
     makedir(plot_folder, sub_folder)
     plt.clf()
-    corrs=data_df.rolling(window=window, min_periods=int(window/3)).corr(
+    data_df.rolling(window=window, min_periods=int(window/3)).corr(
             pairwise=True).loc[pd.IndexSlice[:, corrof], corrwith].unstack(
-                    1).dropna(how='all')
-    corrs.plot(grid=True, figsize=(12, 8),
+                    1).dropna(how='all').plot(grid=True, figsize=(12, 8),
                                               title=title)
     if not os.path.exists(plot_folder):
         os.makedirs(plot_folder)
     plt.savefig(os.path.join(plot_folder, sub_folder, title + '.png'))
     plt.show()
     plt.close()
-    return corrs
 
 
-def calc_ir(data_df, bench='MKT',freq='Y'):
+def calc_ir(data_df, bench='MKT', freq='M'):
     """
-    Function to calculate annual IRs of all factors
+    Function to calculate rolling IRs of all factors
 
     Args:
         data_df (pd.DataFrame): contains returns
 
         bench (str): benchmark
 
+        freq (str): provide the frequency for IR calculation
+
     Returns:
         ir_df (pd.DataFrame): contains IRs wrt benchmark
     """
-    # bench='MKT'; bench='RF'
+    # data_df=us_df.copy(); bench='MKT'; freq='M'
+    # bench='RF'; freq='Y'
+    if freq not in ['M', 'Y']:
+        raise ValueError('Only M and Y allowed as frequencies')
     irof = data_df.columns.difference([bench])
     reg_cols = [[x, bench] for x in irof]
     ann_dates_end = pd.date_range(data_df.index.min(), data_df.index.max(),
                                   freq=freq)
     ann_dates_start = pd.date_range(data_df.index.min(), data_df.index.max(),
                                     freq=freq+'S')
-    ann_dates_start = ann_dates_start.union([pd.offsets.YearBegin(-1) +
+    date_offset = pd.offsets.YearBegin(-1) if freq == 'Y'\
+        else pd.offsets.MonthBegin(-1)
+    ann_dates_start = ann_dates_start.union([date_offset +
                                              data_df.index.min()])
-    # Remove the last date since 2019 has only 1 month worth of data points
-    ann_dates_start = ann_dates_start[:-1]
+    # Remove 2019 since it has only 1 month worth of data points for freq='Y'
+    if freq == 'Y':
+        ann_dates_start = ann_dates_start[:-1]
     ir_df = pd.DataFrame(columns=irof)
     for start_date, end_date in zip(ann_dates_start, ann_dates_end):
         for col in reg_cols:
