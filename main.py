@@ -41,7 +41,33 @@ def dateConverter(d):
         return str(d)+'0'
     else:
         return str(d)
-    
+def rev_roll(x,lookAhead=120):
+    return x.iloc[::-1].rolling(lookAhead, min_periods=0).sum().iloc[::-1]
+def modelMaker(features):
+    allModels={}
+    for i in range(len(features.index)):
+        try:    
+            df=features.loc[features.index[i-120]:features.index[i]]
+            mod = sm.OLS(df['RContra']-df['RF'], sm.add_constant(df[['excessMOM','excessMKT']]))
+            res = mod.fit()
+            allModels[features.index[i+1]]=res
+        except:
+            pass
+    return allModels
+def pred(row,allModels):
+    try:
+     
+        val=allModels[row['Date']].predict(1,[row['excessMOM'],row['excessMKT']])[0]
+        return np.sign(val)*min(.02,np.abs(val))
+    except:
+     
+        return 0
+def predictions(features,allModels,n):
+    df=pd.concat([features['MOMBeta'],features['MKT'].rolling(n).sum().shift(n)],axis=1)
+    df['Date']=df.index
+    df=df.join(features['MOM'])
+    df['predMOM']=df.apply(lambda row: pred(row,allModels),axis=1)
+    return df[['MOM','predMOM']]
 shillerEP=pd.read_csv('shillerEP.csv')
 shillerEP.Date=[datetime.datetime.strptime(dateConverter(d), "%Y.%m").date() for d in shillerEP.Date]
 #shillerEP['PE']=shillerEP['RealPrice']/shillerEP['RealEarnings']
@@ -76,9 +102,6 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
                        index_col=[0])
 #%%
-retMonthWithContra['CAPE']
-pd.Series(pd.cut(bins=[0,10.7,13.7,17.8,22,100],x=retMonthWithContra['CAPE'] ,labels=False, retbins=True, right=False))[0]
-#%%
 '''
 Sample Strategy on full market
 '''
@@ -98,8 +121,6 @@ pctrank = lambda x: pd.Series(x).rank(pct=True).iloc[-1]//.2
 #retMonthWithContra['CAPERank']=retMonthWithContra['CAPE'].rolling(60).apply(pctrank)
 retMonthWithContra['CAPERank']=pd.Series(pd.cut(bins=[0,10.7,13.7,17.8,22,100],x=retMonthWithContra['CAPE'] ,labels=False, retbins=True, right=False))[0]
 
-def rev_roll(x,lookAhead=120):
-    return x.iloc[::-1].rolling(lookAhead, min_periods=0).sum().iloc[::-1]
 
 retMonthWithContra['lookFwdRets']=rev_roll(retMonthWithContra['excessMKT'],120)
 retMonthWithContra.iloc[:-120][['MKT','CAPERank']].groupby('CAPERank').mean()
@@ -117,31 +138,7 @@ mod=sm.OLS(retMonthWithContra['RContra']-retMonthWithContra['RF'], sm.add_consta
 res = mod.fit()
 #%%
 
-def modelMaker(features):
-    allModels={}
-    for i in range(len(features.index)):
-        try:    
-            df=features.loc[features.index[i-120]:features.index[i]]
-            mod = sm.OLS(df['RContra']-df['RF'], sm.add_constant(df[['excessMOM','excessMKT']]))
-            res = mod.fit()
-            allModels[features.index[i+1]]=res
-        except:
-            pass
-    return allModels
-def pred(row,allModels):
-    try:
-     
-        val=allModels[row['Date']].predict(1,[row['excessMOM'],row['excessMKT']])[0]
-        return np.sign(val)*min(.02,np.abs(val))
-    except:
-     
-        return 0
-def predictions(features,allModels,n):
-    df=pd.concat([features['MOMBeta'],features['MKT'].rolling(n).sum().shift(n)],axis=1)
-    df['Date']=df.index
-    df=df.join(features['MOM'])
-    df['predMOM']=df.apply(lambda row: pred(row,allModels),axis=1)
-    return df[['MOM','predMOM']]
+
 #%%
 allModels=modelMaker(retMonthWithContra)
 allModelParams={k:allModels[k].params for k in allModels.keys()}
