@@ -43,4 +43,16 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 # garch_df = fnc.vol_GARCH(mkt_ret, period_start, period_end)
 garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
                        index_col=[0])
-# %%
+
+#%%
+retMonth=((1+us_df).groupby(pd.Grouper(freq='M'))).prod()-1
+retMonth.head()
+
+strat=strat_build.strategies(np.array([1,0,0,0]),retMonth,'RF',datetime.datetime(2010, 1, 1),datetime.datetime(2019, 1, 30))      
+rets=strat.get_factor_return_subset()
+print(rets.head())
+strat.get_plots()
+
+## Annualized Sharpe ratio
+strat.get_sharpe()/np.sqrt(12)
+#np.matmul(np.array(rets),np.array([1,0,0,0]))[:10
