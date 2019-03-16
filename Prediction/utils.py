@@ -358,9 +358,12 @@ class PortfolioOptimizer:
         """
 
         indicators = self.indicators
-        labels = (indicators * list(range(indicators.shape[1]))).sum(1)
+        labels = (indicators * list(range(indicators.shape[1]))).sum(1)\
+            .astype(int)
+        labels = pd.DataFrame(labels)
+        labels.columns = ['labels']
 
-        return labels.astype(int), indicators.columns.tolist()
+        return labels, indicators.columns.tolist()
 
     def reverse_labels(self, labels: pd.DataFrame, label_names: List[str])\
             -> pd.DataFrame:
