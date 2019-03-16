@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import statsmodels.formula.api as sm
 from arch import arch_model
 from scipy.optimize import minimize, basinhopping
+from datetime import datetime
 
 
 def makedir(folder, sub_folder=None):
@@ -113,6 +114,7 @@ def rolling_corr(data_df, corrwith, window, title):
     if not os.path.exists(plot_folder):
         os.makedirs(plot_folder)
     plt.savefig(os.path.join(plot_folder, sub_folder, title + '.png'))
+    plt.ylabel('Correlations')
     plt.show()
     plt.close()
 
@@ -275,3 +277,68 @@ def vol_GARCH(mkt_ret, period_start, period_end):
                 1, 1, True)).iloc[-1]
 
     return forecast_vol
+
+
+def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names):
+    """
+    Function to implement CAPE Valuation Timing
+
+    Args:
+        rolling_window (int): lookback in months used for evaluating CAPE
+        levels
+
+        neutral_wt (float): weight assigned to market assuming neutral
+        valuation
+
+        freq (str): frequency of rebalancing
+
+        static_wts (list): provide static portfolio wts
+
+        fac_names (list): provide list of factor names
+    """
+    # rolling_window=60*12; neutral_wt=0.5; freq='M'; static_wts=[1/3]*3
+    # fac_names=['qual', 'val', 'mom']
+    data_folder = 'Data'
+    filename = 'shillerEP.csv'
+    filepath = os.path.join(data_folder, filename)
+    ep_df = pd.read_csv(filepath)
+    # Drop rows with NaN CAPE
+    ep_df.dropna(subset=['CAPE'], inplace=True)
+
+    def dateConverter(d):
+        if round(d % 1, 2) == 0.1:
+            return str(d)+'0'
+        else:
+            return str(d)
+
+    # Convert dates to month-end
+    ep_df['Date'] = [datetime.strptime(dateConverter(d), "%Y.%m").date() +
+                     pd.offsets.MonthEnd(0) for d in ep_df['Date']]
+    ep_df['EP'] = 1/ep_df['CAPE'].copy()
+    ep_df['EP95Pct'] = ep_df['EP'].rolling(rolling_window,
+                                           min_periods=1).quantile(.95)
+    ep_df['EP5Pct'] = ep_df['EP'].rolling(rolling_window,
+                                          min_periods=1).quantile(.05)
+    ep_df['EPmedian'] = ep_df['EP'].rolling(rolling_window,
+                                            min_periods=1).quantile(.50)
+    # Trim the EP values
+    ep_df['EP'] = ep_df.apply(lambda x: np.clip(x['EP'], x['EP5Pct'],
+                                                x['EP95Pct']), axis=1)
+    # Calculate weights
+    ep_df['w_mkt'] = neutral_wt + (ep_df['EP']-ep_df['EPmedian'])/(
+            ep_df['EP95Pct']-ep_df['EP5Pct'])
+    # Trim the values outside [0, 1]
+    ep_df['w_mkt'] = np.clip(ep_df['w_mkt'], 0, 1)
+    ep_df.set_index('Date', inplace=True)
+    # Start data from 1926
+    ep_df = ep_df.loc['19260101':]
+    # Calculate residual weights
+    ep_df['w_res'] = 1 - ep_df['w_mkt']
+    # Create weights df
+    w = pd.DataFrame(columns=['w_mkt'] + ['w_%s' % x for x in fac_names],
+                     index=ep_df.index)
+    w['w_mkt'] = ep_df['w_mkt'].copy()
+    for i, fac in enumerate(fac_names):
+        col = 'w_%s' % fac
+        w[col] = static_wts[i]*ep_df['w_res'].copy()
+    return w
