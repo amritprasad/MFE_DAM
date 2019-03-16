@@ -1,11 +1,12 @@
 import os
 import pickle
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.preprocessing import OneHotEncoder
 from empyrical import annual_return, max_drawdown, sharpe_ratio
 from pandas.plotting import register_matplotlib_converters
 
@@ -135,7 +136,7 @@ def plot_log_cum_returns(data: pd.DataFrame = build_portfolio())\
     returns = _break_factor_and_weight(returns)
 
     return sns.lineplot(x="DATE", y="Log Cum Ret", hue="factor", size='weight',
-                        data=returns, sizes=[1.5, 1, 1.5], alpha=0.9)
+                        data=returns, alpha=0.9)
 
 
 class PortfolioOptimizer:
@@ -344,3 +345,126 @@ class PortfolioOptimizer:
                         alpha=.5)
 
         return ax
+
+    def get_labels(self) -> Tuple:
+        """
+        Transform the one-hot like indicator dataframe into a single column
+        label dataframe
+
+        Returns
+        -------
+        (pd.DataFrame, List[str])
+            Single column indicator and its according names as a list
+        """
+
+        indicators = self.indicators
+        labels = (indicators * list(range(indicators.shape[1]))).sum(1)
+
+        return labels.astype(int), indicators.columns.tolist()
+
+    def reverse_labels(self, labels: pd.DataFrame, label_names: List[str])\
+            -> pd.DataFrame:
+        """
+        Reverse a label with date index into a one-hot like indicators that
+        `get_best_returns` could use
+
+        Parameters
+        ----------
+        labels : pd.DataFrame
+            A single column indicator starting from 0 with datetime index
+        label_names : List[str]
+            A list of Label name where the order should match `labels`
+
+        Returns
+        -------
+        pd.DataFrame:
+            The one-hot like indicator dataframe
+        """
+        idx = labels.index
+        rev_labels = OneHotEncoder(categories='auto').fit_transform(labels)\
+            .toarray()
+        df = pd.DataFrame(rev_labels)
+        df.index = idx
+        df.columns = label_names
+        return df.replace(0, np.nan)
+
+
+class FeatureBuilder:
+    """
+    A set of builders to construct the features for the machine learning layer
+    classifier
+    """
+
+    macro_location = os.path.join(__file__, '..', '..', 'Data', 'macro')
+
+    def __init__(self, country='USA'):
+        self.country = country
+
+    def _extract_macro_features(self, path=None):
+        if path is None:
+            path = os.path.abspath(
+                os.path.join(self.macro_location,
+                             self.country.lower() + '_macro.csv'))
+
+        return pd.read_csv(path, parse_dates=True, index_col='DATE')
+
+    def get_macro_features(self, path: Optional[str] = None) -> pd.DataFrame:
+        """
+        Get the macro factor features from FRED, this includes:
+        - CPI
+        - Production Manufacturing Index
+        - Government 10Year Bond Index
+        - 3 Month LIBOR rate in according currency
+        - Unemployment Rate
+
+        For each factor, will also take its difference as a feature
+
+        Parameters
+        ----------
+        path : str, optional
+            The file path for the macro dataset (the default is None)
+
+        Returns
+        -------
+        pd.DataFrame
+            The macro based features
+        """
+
+        required_features = ['cpi', 'production', 'gvnbond10y',
+                             '3mlibor', 'unemployment']
+
+        raw_macro_features = self._extract_macro_features(path=path)
+        raw_macro_features = raw_macro_features[required_features]
+
+        for feature in required_features:
+            raw_macro_features[feature + '_diff'] =\
+                raw_macro_features[feature].diff()
+
+        return raw_macro_features.dropna()
+
+    def get_aqr_features(self):
+        """
+        Pull AQR data directly as features, in addition, will use 30D realized
+        volatility as a feature
+        """
+
+        df = load_aqr_data(self.country)
+
+        # Get mkt vol
+        vol = load_aqr_data(self.country)['MKT'].rolling(30).std()
+        df['RV30D'] = vol
+
+        df = df.dropna().resample('M').first()
+        df.index = df.index - pd.offsets.MonthBegin(1)
+        return df
+
+    def get_features(self):
+        """
+        Get all the features and merge them together
+        """
+
+        macro_features = self.get_macro_features()
+        aqr_features = self.get_aqr_features()
+
+        return pd.merge(macro_features, aqr_features, left_index=True,
+                        right_index=True, how='inner')
