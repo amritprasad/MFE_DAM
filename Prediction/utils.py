@@ -1,14 +1,18 @@
 import os
 import pickle
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.preprocessing import OneHotEncoder
 from empyrical import annual_return, max_drawdown, sharpe_ratio
+from lightgbm import LGBMClassifier
 from pandas.plotting import register_matplotlib_converters
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.preprocessing import OneHotEncoder
+from tqdm import tqdm, tqdm_notebook
+import warnings
 
 register_matplotlib_converters()
 sns.set(style="darkgrid")
@@ -48,8 +52,8 @@ def load_aqr_data(country: str = 'USA') -> pd.DataFrame:
 
 def build_portfolio(data: pd.DataFrame = load_aqr_data('USA').dropna(),
                     assets: List[str] = ['QUA', 'SMB', 'HMLFF', 'UMD'],
-                    main_weights: List[float] = [0.4, 0.7],
-                    prefix_names: List[str] = ['main', 'heavy'])\
+                    main_weights: List[float] = [0.7],
+                    prefix_names: List[str] = ['main'])\
         -> pd.DataFrame:
     """
     Build the portfolio returns based on each individual returns.
@@ -272,7 +276,7 @@ class PortfolioOptimizer:
 
         df_merge = pd.merge(
             portfolios.reset_index(), best_strategies,
-            left_on=['Year', 'Month'], right_on=['Year', 'Month'], how='left')
+            left_on=['Year', 'Month'], right_on=['Year', 'Month'], how='right')
 
         for p in df_merge['Best Portfolio'].unique():
             df_merge.loc[df_merge['Best Portfolio'] != p, p] = np.nan
@@ -471,3 +475,143 @@ class FeatureBuilder:
 
         return pd.merge(macro_features, aqr_features, left_index=True,
                         right_index=True, how='inner')
+
+
+# ============================================================================
+#                       Machine Learning Modeling Section
+# ============================================================================
+
+def in_ipynb() -> bool:
+    """
+    Check if the current environment is IPython Notebook
+
+    Note, Spyder terminal is also using ZMQShell but cannot render Widget.
+
+    Returns
+    -------
+    bool
+        True if the current env is Jupyter notebook
+    """
+    try:
+        zmq_status = str(type(get_ipython())) == "<class 'ipykernel.zmqshell.ZMQInteractiveShell'>"  # noqa E501
+        spyder_status = any('SPYDER' in name for name in os.environ)
+        return zmq_status and not spyder_status
+
+    except NameError:
+        return False
+
+
+def get_tqdm() -> Tuple:
+    """
+    Get proper tqdm progress bar instance based on if the current env is
+    Jupyter notebook
+
+    Note, Windows system doesn't supprot default progress bar effects
+
+    Returns
+    -------
+    type, bool
+        either tqdm or tqdm_notebook, the second arg will be ascii option
+    """
+    ascii = True if os.name == 'nt' else False
+
+    if in_ipynb():
+        # Jupyter notebook can always handle ascii correctly
+        return tqdm_notebook, False
+    else:
+        return tqdm, ascii
+
+
+class LightGBM:
+
+    def __init__(self, params_space: Optional[Dict] = None,
+                 search_args: Optional[Dict] = None) -> None:
+
+        if params_space is None:
+            self.type = 'model'
+            self.model = LGBMClassifier()
+        else:
+            if search_args is None:
+                search_args = {
+                    "random_state": 123,
+                    "cv": 3,
+                    "n_jobs": -1,
+                    "n_iter": 10
+                }
+
+            self.type = 'search'
+            self.model = RandomizedSearchCV(
+                estimator=LGBMClassifier(),
+                param_distributions=params_space,
+                **search_args
+            )
+
+    def train(self, x, y):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            self.model.fit(x, y)
+
+    def predict(self, x):
+        return self.model.predict(x)
+
+    def predict_probla(self, x):
+        return self.model.predict_proba(x)
+
+
+class RollingMethod:
+
+    def __init__(self, rolling_bars: int = 90, predict_bars: int = 1) -> None:
+        self.rolling_bars = rolling_bars
+        self.predict_bars = predict_bars
+
+    def run(self, model: LightGBM, x: pd.DataFrame, y: pd.DataFrame)\
+            -> Tuple[pd.DataFrame]:
+
+        idx = x.index
+
+        x = x.values
+        y = y.values
+
+        if len(x) <= self.rolling_bars:
+            raise Exception("RollingMethod cannot be initialzed due to size "
+                            "is smaller than the rolling periods.")
+
+        arr = np.arange(len(x) - self.rolling_bars)
+        arr = arr[arr % self.predict_bars == 0] + self.rolling_bars
+        arr = np.concatenate([arr, [len(x)]])
+
+        predictions = []
+        predict_problas = []
+
+        tqdm, ascii = get_tqdm()
+        for train_end, predict_end in tqdm(zip(arr[:-1], arr[1:]),
+                                           total=len(arr[1:]), ascii=True):
+            train_x = x[train_end - self.rolling_bars: train_end]
+            train_y = y[train_end - self.rolling_bars: train_end]
+
+            # print("Training from bar %d to bar %d..." %
+            #       (train_end - self.rolling_bars, train_end - 1))
+            model.train(train_x, train_y)
+
+            predict_x = x[train_end: predict_end]
+
+            # print("Predicting from bar %d to bar %d..." %
+            #       (train_end, predict_end - 1))
+            predictions.append(
+                model.predict(predict_x))
+            predict_problas.append(
+                model.predict_probla(predict_x))
+
+        predictions = np.concatenate(
+            [np.repeat(np.nan, self.rolling_bars),
+             np.concatenate(predictions)])
+        predict_problas = np.concatenate(
+            [np.repeat(np.nan,
+                       self.rolling_bars * predict_problas[0].shape[1])
+             .reshape(-1, predict_problas[0].shape[1]),
+             np.concatenate(predict_problas)])
+
+        predictions = pd.DataFrame(predictions, index=idx, columns=['labels'])
+        predict_problas = pd.DataFrame(predict_problas, index=idx)
+
+        return predictions, predict_problas
