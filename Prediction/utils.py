@@ -11,6 +11,7 @@ from lightgbm import LGBMClassifier
 from pandas.plotting import register_matplotlib_converters
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import accuracy_score
 from tqdm import tqdm, tqdm_notebook
 import warnings
 
@@ -388,12 +389,60 @@ class PortfolioOptimizer:
             The one-hot like indicator dataframe
         """
         idx = labels.index
-        rev_labels = OneHotEncoder(categories='auto').fit_transform(labels)\
+        coder = OneHotEncoder(categories='auto')
+        rev_labels = coder.fit_transform(labels)\
             .toarray()
-        df = pd.DataFrame(rev_labels)
+
+        diff = np.setdiff1d(np.arange(5.), coder.categories_[0])
+
+        df = pd.DataFrame(rev_labels, columns=coder.categories_[0])
         df.index = idx
+
+        if len(diff) > 0:
+            for d in diff:
+                df[d] = np.nan
+
+        df = df.reindex(sorted(df.columns), axis=1)
         df.columns = label_names
         return df.replace(0, np.nan)
+
+    def get_accuracy_performance_from_ind_probla(
+            self, label: pd.DataFrame, label_probla: pd.DataFrame,
+            label_names: List[str]) -> pd.DataFrame:
+
+        threshes = np.arange(0, 1, 0.02)
+        acc = []
+        perc = []
+        for thresh in threshes:
+            ind = label_probla.dropna()[
+                label_probla.dropna().max(1) >= thresh].index
+
+            y_true = self.get_labels()[0].loc[ind].values.flatten()
+            y_pred = label.loc[ind].values.flatten()
+
+            acc.append(accuracy_score(y_true, y_pred))
+            perc.append(len(y_pred) / len(label.dropna()))
+
+        return pd.DataFrame({
+            'Thresh': threshes,
+            'Accuracy': acc,
+            'Percentage': perc
+        })
+
+    def get_ret_from_ind_probla(self, label: pd.DataFrame,
+                                label_probla: pd.DataFrame,
+                                label_names: List[str],
+                                thresh: float = 0.) -> pd.Series:
+        ind = label_probla.dropna()[
+            label_probla.dropna().max(1) >= thresh].index
+
+        label_copy = label.dropna().copy()
+        label_copy[~label_copy.dropna().index.isin(ind)] = 0
+
+        ret = self.get_best_returns(
+            self.reverse_labels(label_copy.dropna(), label_names))
+
+        return ret
 
 
 class FeatureBuilder:
