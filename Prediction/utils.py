@@ -69,7 +69,7 @@ def build_portfolio(data: pd.DataFrame = load_aqr_data('USA').dropna(),
                     assets: List[str] = ['QUA', 'SMB', 'HMLFF', 'UMD'],
                     main_weights: List[float] = [0.7],
                     prefix_names: List[str] = ['main'],
-                    include_mkt: bool = False)\
+                    include_mkt: bool = True)\
         -> pd.DataFrame:
     """
     Build the portfolio returns based on each individual returns.
@@ -421,7 +421,8 @@ class PortfolioOptimizer:
         rev_labels = coder.fit_transform(labels)\
             .toarray()
 
-        diff = np.setdiff1d(np.arange(5.), coder.categories_[0])
+        diff = np.setdiff1d(np.arange(float(len(label_names))),
+                            coder.categories_[0])
 
         df = pd.DataFrame(rev_labels, columns=coder.categories_[0])
         df.index = idx
