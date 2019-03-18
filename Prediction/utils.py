@@ -1,24 +1,38 @@
 import os
 import pickle
-from typing import List, Optional, Tuple, Dict
+import warnings
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from empyrical import annual_return, max_drawdown, sharpe_ratio
-from lightgbm import LGBMClassifier
 from pandas.plotting import register_matplotlib_converters
+from sklearn.metrics import accuracy_score
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.metrics import accuracy_score
 from tqdm import tqdm, tqdm_notebook
-import warnings
+
+from empyrical import annual_return, max_drawdown, sharpe_ratio
+
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', category=UserWarning)
+    from lightgbm import LGBMClassifier
 
 register_matplotlib_converters()
 sns.set(style="darkgrid")
 mpl.rcParams['legend.frameon'] = True
 mpl.rcParams['legend.facecolor'] = 'w'
+
+
+COLOR_MAPPER = {
+    'equal': '#5972A7',
+    'MKT': '#AA5A58',
+    'QUA': '#C78B64',
+    'HMLFF': '#8C7966',
+    'SMB': '#77A373',
+    'UMD': '#7C75AB'
+}
 
 
 def load_aqr_data(country: str = 'USA') -> pd.DataFrame:
@@ -54,7 +68,8 @@ def load_aqr_data(country: str = 'USA') -> pd.DataFrame:
 def build_portfolio(data: pd.DataFrame = load_aqr_data('USA').dropna(),
                     assets: List[str] = ['QUA', 'SMB', 'HMLFF', 'UMD'],
                     main_weights: List[float] = [0.7],
-                    prefix_names: List[str] = ['main'])\
+                    prefix_names: List[str] = ['main'],
+                    include_mkt: bool = False)\
         -> pd.DataFrame:
     """
     Build the portfolio returns based on each individual returns.
@@ -72,6 +87,8 @@ def build_portfolio(data: pd.DataFrame = load_aqr_data('USA').dropna(),
     prefix_names : List[str]
         A list of prefix names that will be used to assign as the name of
         constructed portfolios
+    include_mkt : bool, optional
+        If True, the portfolio sets will also include the mkt portfolio
 
     Returns
     -------
@@ -117,7 +134,13 @@ def build_portfolio(data: pd.DataFrame = load_aqr_data('USA').dropna(),
         res.append(pd.concat([get_portfolio(w, df, name)
                               for w in get_weights(w, items=len(assets))], 1))
 
-    return pd.concat([equal_df] + res, 1)
+    res = pd.concat([equal_df] + res, 1)
+
+    if include_mkt:
+        res = pd.merge(res, data[['MKT']], left_index=True, right_index=True,
+                       how='inner')
+        res = res.rename(columns={'MKT': 'MKT_MKT'})
+    return res
 
 
 def _break_factor_and_weight(returns: pd.DataFrame,
@@ -129,11 +152,14 @@ def _break_factor_and_weight(returns: pd.DataFrame,
     return returns
 
 
-def plot_log_cum_returns(data: pd.DataFrame = build_portfolio())\
+def plot_log_cum_returns(data: pd.DataFrame = build_portfolio(),
+                         start_time: Optional[str] = None)\
         -> mpl.axes._base._AxesBase:
     """
     Plot the portfolio pulled by `build_portfolio` as line_plots
     """
+    if start_time is not None:
+        data = data[data.index >= start_time]
 
     returns = np.log(data + 1).cumsum()
     returns = returns.reset_index().melt(
@@ -141,7 +167,7 @@ def plot_log_cum_returns(data: pd.DataFrame = build_portfolio())\
     returns = _break_factor_and_weight(returns)
 
     return sns.lineplot(x="DATE", y="Log Cum Ret", hue="factor", size='weight',
-                        data=returns, alpha=0.9)
+                        data=returns, alpha=0.9, palette=COLOR_MAPPER)
 
 
 class PortfolioOptimizer:
