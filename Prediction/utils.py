@@ -334,7 +334,8 @@ class PortfolioOptimizer:
 
         return df_merge[df_merge['Best Portfolio'].unique()].sum(1)
 
-    def plot_log_cum_returns(self, ax: mpl.axes._base._AxesBase)\
+    def plot_log_cum_returns(self, ax: mpl.axes._base._AxesBase,
+                             start_time: Optional[str] = None)\
             -> mpl.axes._base._AxesBase:
         """
         Plot the optimal log cumulative returns vs. the market returns. In
@@ -345,6 +346,9 @@ class PortfolioOptimizer:
 
         # Get optimal cumulative returns
         df_merge = self._get_merged_returns(self.indicators)
+        if start_time is not None:
+            df_merge = df_merge[df_merge.index >= start_time]
+
         best_ret = df_merge[df_merge['Best Portfolio'].unique()].sum(1)
         best_cum = np.log(best_ret + 1).cumsum()
         best_cum.name = 'Optimal Pick'
@@ -361,19 +365,17 @@ class PortfolioOptimizer:
         # Get market cumulative returns
         bench = self.market
         bench.name = 'Mkt'
-        np.log(bench[best_cum.index] + 1).cumsum().plot(ax=ax,
-                                                        color='black',
-                                                        alpha=0.7)
+        np.log(bench[best_cum.index] + 1).cumsum().plot(
+            ax=ax, color=COLOR_MAPPER['MKT'], alpha=0.7)
 
         # Get the equal_weighted cumulative returns
         equal = self.portfolios['equal_weights']
-        np.log(equal[best_cum.index] + 1).cumsum().plot(ax=ax,
-                                                        color='#1B4F72',
-                                                        alpha=1)
+        np.log(equal[best_cum.index] + 1).cumsum().plot(
+            ax=ax, color=COLOR_MAPPER['equal'], alpha=1)
 
         sns.scatterplot(x="DATE", y="Log Cum Ret", hue='factor', s=1500,
                         marker='|', data=returns.reset_index(), ax=ax,
-                        alpha=.5)
+                        alpha=.5, palette=COLOR_MAPPER)
 
         return ax
 
