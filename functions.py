@@ -530,7 +530,7 @@ def calc_weights(state_df, style, shorts, **kwargs):
     Returns:
         w (pd.DataFrame): contains weights for [MKT +  fac_names]
     """
-    # style='score_norm'; shorts=False; style='learn_score_norm'
+    # style='score_norm'; shorts=False; style='learn_score_norm'; shorts=True
     valid_styles = ['score_norm', 'static_tilt', 'learn_score_norm']
     if style not in valid_styles:
         raise ValueError('style has to be one of %s' % (', '.join(
@@ -546,10 +546,17 @@ def calc_weights(state_df, style, shorts, **kwargs):
             net_score = static_exposure @ state_df.loc[date]
             if not shorts:
                 net_score = np.clip(net_score, 0, np.inf)
-#            else:
+                w.loc[date] = net_score/net_score.sum() if\
+                    net_score.sum() else 0
+            else:
+                leverage = kwargs['leverage']
+                wts = net_score/net_score.sum() if net_score.sum() else 0
+                # Adjust leverage
+                if wts.abs().sum() > leverage:
+                    wts = wts/(wts.abs().sum()/leverage)
+                w.loc[date] = wts
 #                idx = net_score.index.difference(['VAL'])
 #                net_score[idx] = np.clip(net_score[idx], 0, np.inf)
-            w.loc[date] = net_score/net_score.sum() if net_score.sum() else 0
 
     elif style == 'static_tilt':
         # Implement CAPE valuation timing and choose a static portfolio of
@@ -589,7 +596,15 @@ def calc_weights(state_df, style, shorts, **kwargs):
             static_wt = static_ports.loc[h_port].mean(axis=0)
 
             w_mkt = w.loc[date, 'MKT']
-            w.loc[date, dyn_cols] = (1-w_mkt)*static_wt
+
+            if shorts:
+                leverage = kwargs['leverage']
+                wts = (1-w_mkt)*static_wt
+                # Adjust leverage
+                if wts.abs().sum() > leverage:
+                    wts = wts/(wts.abs().sum()/leverage)
+
+            w.loc[date, dyn_cols] = wts
 
     elif style == 'learn_score_norm':
         # Calculate weights as normalized scores. Scores are learned in
@@ -634,7 +649,8 @@ def calc_weights(state_df, style, shorts, **kwargs):
                 leverage = kwargs['leverage']
                 wts = net_score/net_score.sum() if net_score.sum() else 0
                 # Adjust leverage
-                wts = wts/(wts.abs().sum()/(leverage-1))
+                if wts.abs().sum() > leverage:
+                    wts = wts/(wts.abs().sum()/leverage)
                 w.loc[date] = wts
 #                idx = net_score.index.difference(['VAL'])
 #                net_score[idx] = np.clip(net_score[idx], 0, np.inf)

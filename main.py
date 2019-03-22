@@ -67,7 +67,7 @@ static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
 
 # Try with shorts=True/False
 w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=False,
-                                static_exposure=static_exposure)
+                                static_exposure=static_exposure, leverage=3)
 # %%
 # Static Tilts
 idx_names = ['Eq Wts', 'Val Overwt', 'Mom Overwt', 'Qual Overwt',
@@ -82,7 +82,7 @@ static_ports = pd.DataFrame(columns=['VAL', 'MOM', 'QUAL'], index=idx_names,
 w_static_ports = fnc.calc_weights(state_df, style='static_tilt', shorts=False,
                                   static_exposure=static_exposure,
                                   rolling_window=60*12, neutral_wt=0.5,
-                                  static_ports=static_ports)
+                                  static_ports=static_ports, leverage=3)
 # %%
 # Learn score
 # Try with shorts=True/False; exp_type='t'/'beta'
