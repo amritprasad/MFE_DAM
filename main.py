@@ -46,3 +46,7 @@ garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
 
 # %%
 # Implement the CAPE valuation timing strategy
+# Equal static weights and neutral weights of 0.5
+w = fnc.cape_timing(rolling_window=60*12, neutral_wt=0.5, freq='M',
+                    static_wts=[1/3]*3, fac_names=['VAL', 'MOM', 'QUAL'])
+macro_df = fnc.macro_data('US', 12)

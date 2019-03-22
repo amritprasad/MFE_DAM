@@ -279,7 +279,8 @@ def vol_GARCH(mkt_ret, period_start, period_end):
     return forecast_vol
 
 
-def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names):
+def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names,
+                start_date='19260731'):
     """
     Function to implement CAPE Valuation Timing
 
@@ -295,9 +296,11 @@ def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names):
         static_wts (list): provide static portfolio wts
 
         fac_names (list): provide list of factor names
+
+        start_date (str): provide the start date to the weights'
     """
     # rolling_window=60*12; neutral_wt=0.5; freq='M'; static_wts=[1/3]*3
-    # fac_names=['qual', 'val', 'mom']
+    # fac_names=['qual', 'val', 'mom']; start_date='19260731'
     data_folder = 'Data'
     filename = 'shillerEP.csv'
     filepath = os.path.join(data_folder, filename)
@@ -330,15 +333,75 @@ def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names):
     # Trim the values outside [0, 1]
     ep_df['w_mkt'] = np.clip(ep_df['w_mkt'], 0, 1)
     ep_df.set_index('Date', inplace=True)
-    # Start data from 1926
-    ep_df = ep_df.loc['19260101':]
+    # Start data from start_date
+    ep_df = ep_df.loc[start_date:]
     # Calculate residual weights
     ep_df['w_res'] = 1 - ep_df['w_mkt']
     # Create weights df
-    w = pd.DataFrame(columns=['w_mkt'] + ['w_%s' % x for x in fac_names],
+    w = pd.DataFrame(columns=['MKT'] + [x for x in fac_names],
                      index=ep_df.index)
-    w['w_mkt'] = ep_df['w_mkt'].copy()
+    w['MKT'] = ep_df['w_mkt'].copy()
     for i, fac in enumerate(fac_names):
-        col = 'w_%s' % fac
+        col = fac
         w[col] = static_wts[i]*ep_df['w_res'].copy()
     return w
+
+
+def macro_data(region, hl_smooth):
+    """
+    Function to read the macro factors data
+
+    Args:
+        region (str): valid values are US, JP and EU
+
+        hl_smooth (int): exponential halflife for smoothing growth
+
+    Returns:
+        pd.DataFrame containing factors returns
+    """
+    # region='US'; hl_smooth=12
+    data_folder = 'Data'
+    filename = 'FactSet Economic Data.xlsx'
+    filepath = os.path.join(data_folder, filename)
+    filename_bbg = 'BBG_Economic Data.xlsx'
+    filepath_bbg = os.path.join(data_folder, filename_bbg)
+    macro_df = pd.read_excel(filepath, sheet_name='Economic Data', skiprows=5,
+                             parse_dates=[0], index_col=[0])
+    bbg_df = pd.read_excel(filepath_bbg, sheet_name='Sheet1', skiprows=6,
+                           parse_dates=[0], index_col=[0])
+    if region == 'US':
+        cols = macro_df.columns[1:3]
+        col_names = ['Growth', 'Inflation']
+        bbg_cols = bbg_df.columns[10:11]
+        bbg_col_names = ['US_LIBOR']
+    elif region == 'JP':
+        cols = macro_df.columns[3:4]
+        col_names = ['Growth']
+        bbg_cols = bbg_df.columns[10:11]
+        bbg_col_names = ['JP_LIBOR']
+    elif region == 'EU':
+        cols = macro_df.columns[4:5]
+        col_names = ['Growth']
+        bbg_cols = bbg_df.columns[10:11]
+        bbg_col_names = ['EU_LIBOR']
+
+    macro_df = macro_df[cols].dropna(how='all')
+    macro_df.columns = col_names
+    bbg_df = bbg_df[bbg_cols].dropna(how='all')
+    bbg_df.columns = bbg_col_names
+    # Smooth values if specified
+    if hl_smooth:
+        macro_df = macro_df.diff().ewm(halflife=hl_smooth).mean()
+
+    macro_df.plot()
+
+    # Combine with BBG rates data
+
+    return macro_df
+
+
+def macro_states():
+    """
+    Function to convert macro factors into binary states
+    """
+    return
