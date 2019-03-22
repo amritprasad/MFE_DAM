@@ -40,13 +40,52 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 # %%
 # Predict IRs
 # Get features for IR prediction
-# garch_df = fnc.vol_GARCH(mkt_ret, period_start, period_end)
-garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
-                       index_col=[0])
+# garch_df = fnc.vol_GARCH(us_df['MKT'].copy(), period_start)
+# garch_df = pd.read_csv('./Data/US_GARCH.csv', parse_dates=[0], index_col=[0])
+garch_df = pd.read_csv('./Data/vol_garch_US_MKT.csv', parse_dates=[0],
+                       index_col=[0], header=None)
+garch_df.columns = ['GARCH_1M']
+garch_df.index.names = ['DATE']
 
 # %%
 # Implement the CAPE valuation timing strategy
 # Equal static weights and neutral weights of 0.5
 w = fnc.cape_timing(rolling_window=60*12, neutral_wt=0.5, freq='M',
                     static_wts=[1/3]*3, fac_names=['VAL', 'MOM', 'QUAL'])
-macro_df = fnc.macro_data('US', 12)
+# %%
+# Implement macro factors strategy
+# macro_df = fnc.macro_data('US', 12)
+macro_df = pd.read_excel('Data/US_Macro_Factors.xlsx', sheet_name='Data',
+                         index_col=[0], parse_dates=[0])
+state_df = fnc.macro_states(macro_df, style='naive', roll_window=60)
+forecast_state_df = fnc.forecast_states(state_df, style='constant')
+static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
+                               columns=['Growth', 'Inflation', 'Liquidity',
+                                        'Volatility'],
+                               data=[[1, 1, -1, 1], [1, -1, -1, -1],
+                                     [1, 0, -1, 0], [-1, 0, -1, 1]])
+
+# Try with shorts=True/False
+w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=False,
+                                static_exposure=static_exposure)
+
+idx_names = ['Eq Wts', 'Val Overwt', 'Mom Overwt', 'Qual Overwt',
+             'Qual Underwt', 'Mom Underwt', 'Val Underwt']
+static_ports = pd.DataFrame(columns=['VAL', 'MOM', 'QUAL'], index=idx_names,
+                            data=[[1/3, 1/3, 1/3], [0.5, 0.25, 0.25],
+                                  [0.25, 0.5, 0.25], [0.25, 0.25, 0.5],
+                                  [0.4, 0.4, 0.2], [0.4, 0.2, 0.4],
+                                  [0.2, 0.4, 0.4]])
+
+# Try with shorts=True/False
+w_static_ports = fnc.calc_weights(state_df, style='static_tilt', shorts=False,
+                                  static_exposure=static_exposure,
+                                  rolling_window=60*12, neutral_wt=0.5,
+                                  static_ports=static_ports)
+
+# Try with shorts=True/False; exp_type='t'/'beta'
+# leverage only used if shorts=True
+w_learn_score_norm = fnc.calc_weights(
+        state_df, style='learn_score_norm', shorts=False, rolling_window=60,
+        ret_df=us_df[['MKT', 'VAL', 'MOM', 'QUAL']].copy(), exp_type='t',
+        leverage=3)

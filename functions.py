@@ -173,7 +173,7 @@ def calc_ir(data_df, bench='MKT', freq='M'):
     return ir_df.astype(float), ann_dates_start, ann_dates_end
 
 
-def vol_GARCH(mkt_ret, period_start, period_end):
+def vol_GARCH(mkt_ret, period_start):
     """
     Function to calculate the GARCH volatility for market returns
 
@@ -181,8 +181,6 @@ def vol_GARCH(mkt_ret, period_start, period_end):
         mkt_ret (pd.Series): market returns
 
         period_start (pd.DatetimeIndex): period start dates
-
-        period_end (pd.DatetimeIndex): period end dates
 
     Returns:
         forecast_vol (pd.Series): GARCH vol prediction
@@ -248,7 +246,7 @@ def vol_GARCH(mkt_ret, period_start, period_end):
     # Convert periods to monthly
     per_start = pd.date_range(period_start.min(), period_start.max(),
                               freq='MS')
-    per_end = pd.date_range(period_end.min(), period_end.max(), freq='M')
+    per_end = per_start + pd.offsets.MonthEnd(12)
     params = pd.DataFrame(columns=['c', 'phi', 'zeta', 'alpha', 'delta'])
     forecast_vol = pd.Series(name='GARCH_1m_FORECAST')
     # Fit GARCH and forecast vol
@@ -270,37 +268,45 @@ def vol_GARCH(mkt_ret, period_start, period_end):
                 raise ValueError('Optimizer did not converge')
 
         params.loc[end_date] = res.x
-        next_month = [end_date+pd.offsets.MonthBegin(),
-                      end_date+pd.offsets.MonthEnd()]
+#        next_month = [start_date+pd.offsets.MonthBegin(),
+#                      start_date+pd.offsets.MonthEnd()]
         forecast_vol.loc[end_date] = np.sqrt(garchFunc(
-                res.x, mkt_ret[next_month[0]:next_month[1]],
+                res.x, mkt_ret[start_date:end_date].copy(),
                 1, 1, True)).iloc[-1]
 
+    forecast_vol = forecast_vol.to_frame()
+    forecast_vol.index.names = ['DATE']
     return forecast_vol
 
 
-def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names,
-                start_date='19260731'):
+def vol_contemp(mkt_ret, period_start, period_end):
     """
-    Function to implement CAPE Valuation Timing
+    Function to calculate contemporaneous volatility
 
     Args:
-        rolling_window (int): lookback in months used for evaluating CAPE
-        levels
+        mkt_ret (pd.Series): market returns
 
-        neutral_wt (float): weight assigned to market assuming neutral
-        valuation
+        period_start (pd.DatetimeIndex): period start dates
 
-        freq (str): frequency of rebalancing
+        period_end (pd.DatetimeIndex): period end dates
 
-        static_wts (list): provide static portfolio wts
-
-        fac_names (list): provide list of factor names
-
-        start_date (str): provide the start date to the weights'
+    Returns:
+        forecast_vol (pd.Series): GARCH vol prediction
     """
-    # rolling_window=60*12; neutral_wt=0.5; freq='M'; static_wts=[1/3]*3
-    # fac_names=['qual', 'val', 'mom']; start_date='19260731'
+    # mkt_ret = us_df['MKT'].copy()
+    vol_df = pd.DataFrame(index=period_end, columns=['Vol'])
+    for start_date, end_date in zip(period_start, period_end):
+        vol_df.loc[end_date] = mkt_ret[start_date:end_date].std()
+
+    return vol_df
+
+
+def load_shiller(rolling_window):
+    """
+    Function to read in Shiller's CAPE data
+
+
+    """
     data_folder = 'Data'
     filename = 'shillerEP.csv'
     filepath = os.path.join(data_folder, filename)
@@ -327,12 +333,45 @@ def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names,
     # Trim the EP values
     ep_df['EP'] = ep_df.apply(lambda x: np.clip(x['EP'], x['EP5Pct'],
                                                 x['EP95Pct']), axis=1)
+
+    ep_df.set_index('Date', inplace=True)
+    ep_df.index.names = ['DATE']
+
+    return ep_df
+
+
+def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names,
+                start_date='19260731'):
+    """
+    Function to implement CAPE Valuation Timing
+
+    Args:
+        rolling_window (int): lookback in months used for evaluating CAPE
+        levels
+
+        neutral_wt (float): weight assigned to market assuming neutral
+        valuation
+
+        freq (str): frequency of rebalancing
+
+        static_wts (list): provide static portfolio wts
+
+        fac_names (list): provide list of factor names
+
+        start_date (str): provide the start date to the weights'
+
+    Returns:
+        w (pd.DataFrame): contains weights for [MKT +  fac_names]
+    """
+    # rolling_window=60*12; neutral_wt=0.5; freq='M'; static_wts=[1/3]*3
+    # fac_names=['qual', 'val', 'mom']; start_date='19260731'
+    # Load Shiller's EP
+    ep_df = load_shiller(rolling_window)
     # Calculate weights
     ep_df['w_mkt'] = neutral_wt + (ep_df['EP']-ep_df['EPmedian'])/(
             ep_df['EP95Pct']-ep_df['EP5Pct'])
     # Trim the values outside [0, 1]
     ep_df['w_mkt'] = np.clip(ep_df['w_mkt'], 0, 1)
-    ep_df.set_index('Date', inplace=True)
     # Start data from start_date
     ep_df = ep_df.loc[start_date:]
     # Calculate residual weights
@@ -344,10 +383,11 @@ def cape_timing(rolling_window, neutral_wt, freq, static_wts, fac_names,
     for i, fac in enumerate(fac_names):
         col = fac
         w[col] = static_wts[i]*ep_df['w_res'].copy()
+
     return w
 
 
-def macro_data(region, hl_smooth):
+def macro_data(region, hl_smooth, us_df, garch_df):
     """
     Function to read the macro factors data
 
@@ -356,52 +396,247 @@ def macro_data(region, hl_smooth):
 
         hl_smooth (int): exponential halflife for smoothing growth
 
+        us_df (pd.DataFrame): contains risk-free data
+
+        garch_df (pd.DataFrame): 1M ahead GARCH vol forecast
+
     Returns:
         pd.DataFrame containing factors returns
     """
-    # region='US'; hl_smooth=12
+    # region='US'; hl_smooth=0
+    fac_names = ['Growth', 'Inflation', 'Liquidity', 'Volatility']
     data_folder = 'Data'
     filename = 'FactSet Economic Data.xlsx'
     filepath = os.path.join(data_folder, filename)
     filename_bbg = 'BBG_Economic Data.xlsx'
     filepath_bbg = os.path.join(data_folder, filename_bbg)
-    macro_df = pd.read_excel(filepath, sheet_name='Economic Data', skiprows=5,
-                             parse_dates=[0], index_col=[0])
+
     bbg_df = pd.read_excel(filepath_bbg, sheet_name='Sheet1', skiprows=6,
-                           parse_dates=[0], index_col=[0])
+                           parse_dates=[0], index_col=[0]).asfreq(
+                                   'M', method='ffill')
+    macro_df = pd.read_excel(filepath, sheet_name='Economic Data',
+                             skiprows=5, parse_dates=[0],
+                             index_col=[0]).asfreq('M', method='ffill')
+
     if region == 'US':
-        cols = macro_df.columns[1:3]
-        col_names = ['Growth', 'Inflation']
-        bbg_cols = bbg_df.columns[10:11]
-        bbg_col_names = ['US_LIBOR']
+        cols = macro_df.columns[1:2]
+        col_names = ['Growth']
+        bbg_cols = bbg_df.columns[[6, 10]]
+        bbg_col_names = ['Inflation', 'LIBOR']
+        # Difference inflation rate
+        bbg_df[bbg_cols[0]] = bbg_df[bbg_cols[0]].diff()
     elif region == 'JP':
         cols = macro_df.columns[3:4]
         col_names = ['Growth']
-        bbg_cols = bbg_df.columns[10:11]
-        bbg_col_names = ['JP_LIBOR']
+        bbg_cols = bbg_df.columns[[3, 10]]
+        bbg_col_names = ['LIBOR']
     elif region == 'EU':
         cols = macro_df.columns[4:5]
         col_names = ['Growth']
         bbg_cols = bbg_df.columns[10:11]
-        bbg_col_names = ['EU_LIBOR']
+        bbg_col_names = ['LIBOR']
 
     macro_df = macro_df[cols].dropna(how='all')
     macro_df.columns = col_names
-    bbg_df = bbg_df[bbg_cols].dropna(how='all')
+    macro_df.index.names = ['DATE']
+    bbg_df = bbg_df[bbg_cols].dropna(how='all')/100
     bbg_df.columns = bbg_col_names
+    bbg_df['LIBOR'] /= 12
+    bbg_df.index.names = ['DATE']
     # Smooth values if specified
     if hl_smooth:
         macro_df = macro_df.diff().ewm(halflife=hl_smooth).mean()
 
-    macro_df.plot()
-
     # Combine with BBG rates data
+    macro_df = macro_df.merge(bbg_df, left_index=True, right_index=True,
+                              how='left')
+    # Combine with risk-free rate
+    macro_df['RF'] = us_df['RF'].asfreq('M', method='ffill')*625/30
+    macro_df['Liquidity'] = macro_df['RF'].subtract(macro_df['LIBOR'])
+    # Combine with volatility
+    macro_df['Volatility'] = garch_df['GARCH_1M'].asfreq('M', method='ffill')
+
+    # Keep only the factors
+    macro_df = macro_df[fac_names]
+    print(macro_df.apply(lambda x: x.first_valid_index(), axis=0))
 
     return macro_df
 
 
-def macro_states():
+def macro_states(macro_df, style, roll_window):
     """
     Function to convert macro factors into binary states
+
+    Args:
+        macro_df (pd.DataFrame): contains macro factors data
+
+        style (str): specify method used to classify. Accepted values:
+            'naive'
+
+        roll_window (int): specify rolling window in months
+
+    Returns:
+        state_df (pd.DataFrame): macro factors classified to binary states.
+        1 for up and 0 for down
     """
-    return
+    # style='naive'; roll_window=60
+    if style == 'naive':
+        # Classify on the basis of a rolling median
+        roll_median = macro_df.rolling(roll_window).median()
+        state_df = macro_df >= roll_median
+        state_df = state_df[pd.notnull(roll_median)].dropna(how='all')
+        state_df.replace(0, -1, inplace=True)
+        state_df.fillna(0, inplace=True)
+
+    return state_df
+
+
+def forecast_states(state_df, style):
+    """
+    Function to forecast macro factor states
+
+    Args:
+        state_df (pd.DataFrame): macro factors classified to binary states
+
+        style (str): specify method used to classify. Accepted values:
+            'constant'
+
+    Returns:
+        forecast_states_df (pd.DataFrame)
+    """
+    # style='constant'
+    if style == 'constant':
+        # Forecast next period's state equal to current period
+        forecast_state_df = state_df.shift(1).dropna(how='all')
+
+    return forecast_state_df
+
+
+def calc_weights(state_df, style, shorts, **kwargs):
+    """
+    Function to calculate weights
+
+    Args:
+        states_df (pd.DataFrame): contains forecasts of macro factor
+        weights
+
+        style (str): specify method to calculate weights. Accepted values:
+            'score_norm', 'static_tilt', 'learn_score_norm'
+
+        shorts (bool): specify if shorting is allowed
+
+        **kwargs (dict)
+
+    Returns:
+        w (pd.DataFrame): contains weights for [MKT +  fac_names]
+    """
+    # style='score_norm'; shorts=False; style='learn_score_norm'
+    valid_styles = ['score_norm', 'static_tilt', 'learn_score_norm']
+    if style not in valid_styles:
+        raise ValueError('style has to be one of %s' % (', '.join(
+                valid_styles)))
+    w = pd.DataFrame(index=state_df.index,
+                     columns=['MKT', 'VAL', 'MOM', 'QUAL'])
+
+    if style == 'score_norm':
+        # Calculate weights as normalized scores. Scores are provided using
+        # static exposure matrix
+        static_exposure = kwargs['static_exposure']
+        for date in w.index:
+            net_score = static_exposure @ state_df.loc[date]
+            if not shorts:
+                net_score = np.clip(net_score, 0, np.inf)
+#            else:
+#                idx = net_score.index.difference(['VAL'])
+#                net_score[idx] = np.clip(net_score[idx], 0, np.inf)
+            w.loc[date] = net_score/net_score.sum() if net_score.sum() else 0
+
+    elif style == 'static_tilt':
+        # Implement CAPE valuation timing and choose a static portfolio of
+        # dynamic factors for tilt
+        static_exposure = kwargs['static_exposure']
+        rolling_window = kwargs['rolling_window']
+        neutral_wt = kwargs['neutral_wt']
+        static_ports = kwargs['static_ports']
+        # Load Shiller's EP
+        ep_df = load_shiller(rolling_window)
+        # Calculate weights
+        ep_df['w_mkt'] = neutral_wt + (ep_df['EP']-ep_df['EPmedian'])/(
+                ep_df['EP95Pct']-ep_df['EP5Pct'])
+        # Trim the values outside [0, 1]
+        ep_df['w_mkt'] = np.clip(ep_df['w_mkt'], 0, 1)
+        # Calculate residual weights
+        ep_df['w_res'] = 1 - ep_df['w_mkt']
+        # Create weights df
+        w['MKT'] = ep_df['w_mkt'].copy()
+        dyn_cols = w.columns.difference(['MKT'])
+        for date in w.index:
+            net_score = static_exposure.loc[dyn_cols] @ state_df.loc[date]
+            if not shorts:
+                # Allow no shorting
+                net_score = np.clip(net_score, 0, np.inf)
+#            else:
+#                # Allow shorting of VAL
+#                idx = net_score.index.difference(['VAL'])
+#                net_score[idx] = np.clip(net_score[idx], 0, np.inf)
+
+            # Choose portfolios with the highest score
+            h_port = static_ports.reindex(dyn_cols, axis=1) @ net_score
+            max_score = h_port.max()
+            h_port = h_port.index[h_port == max_score]
+
+            # Calc portfolio that is the mean of the highest score portfolios
+            static_wt = static_ports.loc[h_port].mean(axis=0)
+
+            w_mkt = w.loc[date, 'MKT']
+            w.loc[date, dyn_cols] = (1-w_mkt)*static_wt
+
+    elif style == 'learn_score_norm':
+        # Calculate weights as normalized scores. Scores are learned in
+        # a rolling window
+        rolling_window = kwargs['rolling_window']
+        ret_df = kwargs['ret_df']
+        exp_type = kwargs['exp_type']
+        # Convert to monthly returns
+        valid_ret = pd.notnull(ret_df).resample('M').last()
+        ret_df = ret_df.resample('M').apply(lambda x: np.product(1+x) - 1)
+        ret_df = ret_df[valid_ret]
+        # Create df for regression
+        common_dates = state_df.index.intersection(ret_df.index)
+        ret_df = ret_df.loc[common_dates]
+        # Run rolling regression
+
+        def roll_reg(ret, X, exp_type):
+            exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
+                                    columns=['Growth', 'Inflation',
+                                             'Liquidity', 'Volatility'])
+            for col in ret:
+                reg_col = sm.OLS(ret[col], X, hasconst=True).fit()
+                if exp_type == 't':
+                    exposure.loc[col] = reg_col.tvalues.fillna(0)
+                elif exp_type == 'beta':
+                    exposure.loc[col] = reg_col.params
+            return exposure
+
+        w = pd.DataFrame(index=state_df.index[rolling_window-1:],
+                         columns=['MKT', 'VAL', 'MOM', 'QUAL'])
+        for date in w.index:
+            dates = pd.date_range(date - pd.offsets.MonthEnd(rolling_window-1),
+                                  date, freq='M')
+            exposure = roll_reg(ret_df.loc[dates], state_df.loc[dates],
+                                exp_type)
+            net_score = exposure @ state_df.loc[date]
+            if not shorts:
+                net_score = np.clip(net_score, 0, np.inf)
+                w.loc[date] = net_score/net_score.sum() if\
+                    net_score.sum() else 0
+            else:
+                leverage = kwargs['leverage']
+                wts = net_score/net_score.sum() if net_score.sum() else 0
+                # Adjust leverage
+                wts = wts/(wts.abs().sum()/(leverage-1))
+                w.loc[date] = wts
+#                idx = net_score.index.difference(['VAL'])
+#                net_score[idx] = np.clip(net_score[idx], 0, np.inf)
+
+    return w
