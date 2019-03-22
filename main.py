@@ -44,15 +44,9 @@ print(ir_rf_df.apply(lambda x: x.autocorr(), axis=0))
 garch_df = pd.read_csv('./Data/US_GARCH_1m.csv', parse_dates=[0],
                        index_col=[0])
 
-#%%
-retMonth=((1+us_df).groupby(pd.Grouper(freq='M'))).prod()-1
-retMonth.head()
-
-strat=strat_build.strategies(np.array([1,0,0,0]),retMonth,'RF',datetime.datetime(2010, 1, 1),datetime.datetime(2019, 1, 30))      
-rets=strat.get_factor_return_subset()
-print(rets.head())
-strat.get_plots()
-
-## Annualized Sharpe ratio
-strat.get_sharpe()/np.sqrt(12)
-#np.matmul(np.array(rets),np.array([1,0,0,0]))[:10
+# %%
+# Implement the CAPE valuation timing strategy
+# Equal static weights and neutral weights of 0.5
+w = fnc.cape_timing(rolling_window=60*12, neutral_wt=0.5, freq='M',
+                    static_wts=[1/3]*3, fac_names=['VAL', 'MOM', 'QUAL'])
+macro_df = fnc.macro_data('US', 12)
