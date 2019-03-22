@@ -633,12 +633,14 @@ def calc_weights(state_df, style, shorts, **kwargs):
                     exposure.loc[col] = reg_col.params
             return exposure
 
-        w = pd.DataFrame(index=state_df.index[rolling_window-1:],
+        w = pd.DataFrame(index=state_df.index[rolling_window:],
                          columns=['MKT', 'VAL', 'MOM', 'QUAL'])
         for date in w.index:
-            dates = pd.date_range(date - pd.offsets.MonthEnd(rolling_window-1),
+            dates = pd.date_range(date - pd.offsets.MonthEnd(rolling_window),
                                   date, freq='M')
-            exposure = roll_reg(ret_df.loc[dates], state_df.loc[dates],
+            exposure = roll_reg(ret_df.loc[dates[1:]].reset_index(drop=True),
+                                state_df.loc[dates[:-1]].reset_index(
+                                        drop=True),
                                 exp_type)
             net_score = exposure @ state_df.loc[date]
             if not shorts:

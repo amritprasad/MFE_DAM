@@ -91,3 +91,4 @@ w_learn_score_norm = fnc.calc_weights(
         state_df, style='learn_score_norm', shorts=False, rolling_window=60,
         ret_df=us_df[['MKT', 'VAL', 'MOM', 'QUAL']].copy(), exp_type='t',
         leverage=3)
+w_learn_score_norm.to_csv('Outputs/learn_score_norm/w_learn_score_norm_short-False_exp-t.csv')
