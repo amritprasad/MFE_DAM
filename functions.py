@@ -634,6 +634,9 @@ def calc_weights(state_df, style, shorts, **kwargs):
 
         w = pd.DataFrame(index=state_df.index[rolling_window:],
                          columns=['MKT', 'VAL', 'MOM', 'QUAL'])
+
+        # Store exposures
+        exp_df = []
         for date in w.index:
             dates = pd.date_range(date - pd.offsets.MonthEnd(rolling_window),
                                   date, freq='M')
@@ -642,6 +645,9 @@ def calc_weights(state_df, style, shorts, **kwargs):
                                         drop=True),
                                 exp_type)
             net_score = exposure @ state_df.loc[date]
+
+            exp_df.append(exposure)
+
             if not shorts:
                 net_score = np.clip(net_score, 0, np.inf)
                 w.loc[date] = net_score/net_score.sum() if\
@@ -655,5 +661,11 @@ def calc_weights(state_df, style, shorts, **kwargs):
                 w.loc[date] = wts
 #                idx = net_score.index.difference(['VAL'])
 #                net_score[idx] = np.clip(net_score[idx], 0, np.inf)
+
+        exp_df = pd.concat(exp_df, keys=w.index)
+        exp_df.index.names = ['DATE', 'Dynamic Factors']
+        exp_df.columns.names = ['Macro Factors']
+
+        return w, exp_df
 
     return w

@@ -96,8 +96,10 @@ w_static_ports.to_csv('Outputs/static_ports/%s' % filename)
 shorts = True
 exp_type = 't'
 filename = 'w_learn_score_norm_short-%s_exp-%s.csv' % (shorts, exp_type)
-w_learn_score_norm = fnc.calc_weights(
+exp_filename = 'exp_%s.csv' % exp_type
+w_learn_score_norm, exp_df = fnc.calc_weights(
         state_df, style='learn_score_norm', shorts=shorts, rolling_window=60,
         ret_df=us_df[['MKT', 'VAL', 'MOM', 'QUAL']].copy(), exp_type=exp_type,
         leverage=3)
 w_learn_score_norm.to_csv('Outputs/learn_score_norm/%s' % filename)
+exp_df.to_csv('Outputs/learn_score_norm/%s' % exp_filename)
