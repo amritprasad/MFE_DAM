@@ -6,6 +6,7 @@ Authors: Ms. Allocation
 
 # Imports
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Import functions
 import functions as fnc
@@ -59,11 +60,17 @@ macro_df = pd.read_excel('Data/US_Macro_Factors.xlsx', sheet_name='Data',
                          index_col=[0], parse_dates=[0])
 state_df = fnc.macro_states(macro_df, style='naive', roll_window=60)
 forecast_state_df = fnc.forecast_states(state_df, style='constant')
+#static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
+#                               columns=['Growth', 'Inflation', 'Liquidity',
+#                                        'Volatility'],
+#                               data=[[1, -1, -1, -1], [-1, 1, -1, 0],
+#                                     [1, 0, -1, -1], [-1, 0, -1, 1]])
+
 static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
                                columns=['Growth', 'Inflation', 'Liquidity',
                                         'Volatility'],
-                               data=[[1, -1, -1, -1], [-1, 1, -1, 0],
-                                     [1, 0, -1, -1], [-1, 0, -1, 1]])
+                               data=[[1, -1, -1, -1], [0, 0, 0, -1],
+                                     [1, 0, -1, -1], [1, 0, -1, 0]])
 
 # Try with shorts=True/False
 shorts = False
@@ -103,3 +110,28 @@ w_learn_score_norm, exp_df = fnc.calc_weights(
         leverage=3)
 w_learn_score_norm.to_csv('Outputs/learn_score_norm/%s' % filename)
 exp_df.to_csv('Outputs/learn_score_norm/%s' % exp_filename)
+# %%
+# Plot together
+# Plot all exposure coefficients
+for dyn in exp_df.index.get_level_values('Dynamic Factors').unique():
+    plt.clf()
+    plt.figure(figsize=(8, 6))
+    for i, macro in enumerate(exp_df.columns):
+        x = exp_df.index.get_level_values('DATE').unique()
+        plt.plot(x, exp_df.loc[pd.IndexSlice[:, dyn], macro])
+    plt.plot(x, [0]*len(x))
+    plt.legend(exp_df.columns.union(['x = 0']))
+    plt.ylabel(r'$\beta$')
+    plt.xlabel('DATE')
+    plt.title(r'$\beta$ vs Time')
+    plt.savefig('Plots/Factor_Exposures/%s.png' % dyn)
+    plt.show()
+    plt.close()
+# %%
+# Describe exposures
+for macro in exp_df.columns:
+    print(exp_df.unstack(1).loc[:, pd.IndexSlice[macro, :]].astype(float).describe())
+# %%
+# Describe exposures
+for dyn in exp_df.index.get_level_values('Dynamic Factors').unique():
+    print(exp_df.unstack(1).swaplevel(axis=1).loc[:, pd.IndexSlice[dyn, :]].astype(float).describe())
