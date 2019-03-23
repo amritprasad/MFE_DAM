@@ -596,10 +596,9 @@ def calc_weights(state_df, style, shorts, **kwargs):
             static_wt = static_ports.loc[h_port].mean(axis=0)
 
             w_mkt = w.loc[date, 'MKT']
-
+            wts = (1-w_mkt)*static_wt
             if shorts:
                 leverage = kwargs['leverage']
-                wts = (1-w_mkt)*static_wt
                 # Adjust leverage
                 if wts.abs().sum() > leverage:
                     wts = wts/(wts.abs().sum()/leverage)

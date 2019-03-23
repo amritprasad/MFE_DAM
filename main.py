@@ -66,8 +66,11 @@ static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
                                      [1, 0, -1, 0], [-1, 0, -1, 1]])
 
 # Try with shorts=True/False
-w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=False,
+shorts = True
+filename = 'w_score_norm_short-%s.csv' % shorts
+w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=shorts,
                                 static_exposure=static_exposure, leverage=3)
+w_score_norm.to_csv('Outputs/score_norm/%s' % filename)
 # %%
 # Static Tilts
 idx_names = ['Eq Wts', 'Val Overwt', 'Mom Overwt', 'Qual Overwt',
@@ -79,16 +82,22 @@ static_ports = pd.DataFrame(columns=['VAL', 'MOM', 'QUAL'], index=idx_names,
                                   [0.2, 0.4, 0.4]])
 
 # Try with shorts=True/False
-w_static_ports = fnc.calc_weights(state_df, style='static_tilt', shorts=False,
+shorts = True
+filename = 'w_static_ports_short-%s.csv' % shorts
+w_static_ports = fnc.calc_weights(state_df, style='static_tilt', shorts=shorts,
                                   static_exposure=static_exposure,
                                   rolling_window=60*12, neutral_wt=0.5,
                                   static_ports=static_ports, leverage=3)
+w_static_ports.to_csv('Outputs/static_ports/%s' % filename)
 # %%
 # Learn score
 # Try with shorts=True/False; exp_type='t'/'beta'
 # leverage only used if shorts=True
+shorts = True
+exp_type = 't'
+filename = 'w_learn_score_norm_short-%s_exp-%s.csv' % (shorts, exp_type)
 w_learn_score_norm = fnc.calc_weights(
-        state_df, style='learn_score_norm', shorts=False, rolling_window=60,
-        ret_df=us_df[['MKT', 'VAL', 'MOM', 'QUAL']].copy(), exp_type='t',
+        state_df, style='learn_score_norm', shorts=shorts, rolling_window=60,
+        ret_df=us_df[['MKT', 'VAL', 'MOM', 'QUAL']].copy(), exp_type=exp_type,
         leverage=3)
-w_learn_score_norm.to_csv('Outputs/learn_score_norm/w_learn_score_norm_short-False_exp-t.csv')
+w_learn_score_norm.to_csv('Outputs/learn_score_norm/%s' % filename)
