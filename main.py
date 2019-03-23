@@ -62,11 +62,11 @@ forecast_state_df = fnc.forecast_states(state_df, style='constant')
 static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
                                columns=['Growth', 'Inflation', 'Liquidity',
                                         'Volatility'],
-                               data=[[1, 1, -1, 1], [1, -1, -1, -1],
-                                     [1, 0, -1, 0], [-1, 0, -1, 1]])
+                               data=[[1, -1, -1, -1], [-1, 1, -1, 0],
+                                     [1, 0, -1, -1], [-1, 0, -1, 1]])
 
 # Try with shorts=True/False
-shorts = True
+shorts = False
 filename = 'w_score_norm_short-%s.csv' % shorts
 w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=shorts,
                                 static_exposure=static_exposure, leverage=3)
@@ -94,7 +94,7 @@ w_static_ports.to_csv('Outputs/static_ports/%s' % filename)
 # Try with shorts=True/False; exp_type='t'/'beta'
 # leverage only used if shorts=True
 shorts = True
-exp_type = 't'
+exp_type = 'beta'
 filename = 'w_learn_score_norm_short-%s_exp-%s.csv' % (shorts, exp_type)
 exp_filename = 'exp_%s.csv' % exp_type
 w_learn_score_norm, exp_df = fnc.calc_weights(
