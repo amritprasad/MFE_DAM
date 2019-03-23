@@ -69,11 +69,11 @@ forecast_state_df = fnc.forecast_states(state_df, style='constant')
 static_exposure = pd.DataFrame(index=['MKT', 'VAL', 'MOM', 'QUAL'],
                                columns=['Growth', 'Inflation', 'Liquidity',
                                         'Volatility'],
-                               data=[[1, -1, -1, -1], [0, 0, 0, -1],
+                               data=[[1, 0, 0, 0], [0, 0, 0, -1],
                                      [1, 0, -1, -1], [1, 0, -1, 0]])
 
 # Try with shorts=True/False
-shorts = False
+shorts = True
 filename = 'w_score_norm_short-%s.csv' % shorts
 w_score_norm = fnc.calc_weights(state_df, style='score_norm', shorts=shorts,
                                 static_exposure=static_exposure, leverage=3)
