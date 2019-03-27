@@ -439,7 +439,8 @@ class PortfolioOptimizer:
             self, label: pd.DataFrame, label_probla: pd.DataFrame,
             label_names: List[str]) -> pd.DataFrame:
 
-        threshes = np.arange(0, 1, 0.02)
+        # threshes = np.arange(0, 1, 0.02)
+        threshes = [0., 0.3, 0.5, 0.8]
         acc = []
         perc = []
         for thresh in threshes:
@@ -466,7 +467,7 @@ class PortfolioOptimizer:
             label_probla.dropna().max(1) >= thresh].index
 
         label_copy = label.dropna().copy()
-        label_copy[~label_copy.dropna().index.isin(ind)] = 0
+        label_copy[~label_copy.dropna().index.isin(ind)] = 5
 
         ret = self.get_best_returns(
             self.reverse_labels(label_copy.dropna(), label_names))
@@ -660,6 +661,7 @@ class RollingMethod:
 
         predictions = []
         predict_problas = []
+        models = {}
 
         tqdm, ascii = get_tqdm()
         for train_end, predict_end in tqdm(zip(arr[:-1], arr[1:]),
@@ -679,6 +681,8 @@ class RollingMethod:
                 model.predict(predict_x))
             predict_problas.append(
                 model.predict_probla(predict_x))
+            models[idx[train_end].strftime('%Y-%m-%d')] = \
+                model.model.best_estimator_
 
         predictions = np.concatenate(
             [np.repeat(np.nan, self.rolling_bars),
@@ -692,4 +696,81 @@ class RollingMethod:
         predictions = pd.DataFrame(predictions, index=idx, columns=['labels'])
         predict_problas = pd.DataFrame(predict_problas, index=idx)
 
-        return predictions, predict_problas
+        return predictions, predict_problas, models
+
+
+# ============================================================================
+#                              BackTest Helpers
+# ============================================================================
+
+def reverse_labels_to_weights(country: str, labels: pd.DataFrame,
+                              label_probla: pd.DataFrame,
+                              label_names: List[str],
+                              thresh: float = 0.,) -> pd.DataFrame:
+    weights_dict = {
+        'equal_weights': {'QUA': 0.25, 'HMLFF': 0.25, 'SMB': 0.25, 'UMD': 0.25, 'MKT': 0},  # noqa
+        'main_QUA': {'QUA': 0.7, 'HMLFF': 0.1, 'SMB': 0.1, 'UMD': 0.1, 'MKT': 0},  # noqa
+        'main_SMB': {'QUA': 0.1, 'HMLFF': 0.1, 'SMB': 0.7, 'UMD': 0.1, 'MKT': 0},  # noqa
+        'main_HMLFF': {'QUA': 0.1, 'HMLFF': 0.7, 'SMB': 0.1, 'UMD': 0.1, 'MKT': 0},  # noqa
+        'main_UMD': {'QUA': 0.1, 'HMLFF': 0.1, 'SMB': 0.1, 'UMD': 0.7, 'MKT': 0},  # noqa
+        'MKT_MKT': {'QUA': 0, 'HMLFF': 0, 'SMB': 0, 'UMD': 0, 'MKT': 1}
+    }
+
+    ind = label_probla.dropna()[
+        label_probla.dropna().max(1) >= thresh].index
+
+    label_copy = labels.dropna().copy()
+    label_copy[~label_copy.dropna().index.isin(ind)] = 5.0
+
+    _weights = []
+    for i, label in enumerate(label_names):
+        _weights.append(
+            pd.DataFrame(
+                weights_dict[label],
+                index=label_copy[label_copy['labels'] == float(i)].index)
+        )
+    weights = pd.concat(_weights).sort_index()
+    returns = load_aqr_data(country).dropna()
+
+    weights['Year'] = weights.index.year
+    weights['Month'] = weights.index.month
+    returns['Year'] = returns.index.year
+    returns['Month'] = returns.index.month
+
+    res = pd.merge(returns[['Year', 'Month']].reset_index(), weights,
+                   left_on=['Year', 'Month'], right_on=['Year', 'Month'],
+                   how='inner')
+
+    return res.set_index('DATE')[['QUA', 'HMLFF', 'SMB', 'UMD', 'MKT']]
+
+
+def construct_virtual_assets(country: str, multiplier: float = 1e6) -> pd.DataFrame:  # noqa
+    returns = load_aqr_data(country).dropna()
+    prices = (returns[['QUA', 'HMLFF', 'SMB', 'UMD', 'MKT']] + 1).cumprod() / multiplier  # noqa
+
+    datasets = []
+    metrics = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+    for col in prices.columns:
+        data = pd.DataFrame({'Volume': 999}, index=prices[col].index)
+        for metric in metrics:
+            data[metric] = prices[col].values
+        datasets.append(data)
+
+    return datasets
+
+
+def plot_feature_importance_over_time(models: List[LGBMClassifier],
+                                      feature_names: List[str],
+                                      ax: mpl.axes.Axes) -> mpl.axes.Axes:
+    importances = [(model.feature_importances_ / model.feature_importances_.sum()).reshape(1, -1)  # noqa
+                   for name, model in models.items()]
+    importances_df = pd.DataFrame(np.concatenate(importances))
+    importances_df.columns = feature_names
+    importances_df.index = [name for name, model in models.items()]
+
+    ax = importances_df.plot.area(legend=False, cmap='tab20c', ax=ax)
+    ax.set_ylabel('Importance')
+    ax.set_ylim((0, 1))
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    return ax
